@@ -1,0 +1,826 @@
+<!--
+  SEKALA — Sistem Evaluasi Kawasan Analitik Lokal
+  Pemetaan Daya Saing Sektoral dan Tipologi Pembangunan Kabupaten/Kota Maluku Utara
+  
+  Peneliti: Ricky | Metode: LQ · DLQ · Shift-Share Analysis (Esteban-Marquillas) · Tipologi Klassen
+  Data: BPS PDRB ADHK 2015-2023 (nilai analitik merupakan simulasi prototipe)
+  
+  CARA MENJALANKAN DI GITHUB PAGES:
+  1. Buat repositori baru di GitHub
+  2. Upload file ini sebagai index.html
+  3. Aktifkan GitHub Pages pada Settings > Pages > pilih branch main
+  4. Dashboard dapat diakses di https://[username].github.io/[repo-name]
+  
+  Dependensi eksternal (CDN, membutuhkan koneksi internet):
+  - Leaflet.js 1.9.4 (peta interaktif)
+  - Chart.js 4.4.3 (visualisasi analitik)
+  - Google Fonts: Cormorant Garamond + DM Sans
+  - CartoDB Positron (tile peta dasar)
+  
+  Catatan: Batas wilayah kabupaten/kota merupakan aproksimasi untuk keperluan prototipe.
+  Implementasi produksi menggunakan GeoJSON resmi dari Badan Informasi Geospasial (BIG)
+  via portal tanahair.indonesia.go.id
+-->
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SEKALA — Sistem Evaluasi Kawasan Analitik Lokal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --n9:#07192b;--n8:#0f2741;--n7:#163559;--n6:#1e4678;--n5:#2558a0;
+  --n4:#3b74c8;--n3:#6b9fd8;--n2:#a8c8ec;--n1:#d8eaf8;--n0:#f2f8fd;
+  --am:#c96a1e;--am2:#e8a46a;
+  --txt-d:#c8ddf0;--txt-m:#7aa0c0;--txt-l:#3a5878;
+  --brd:#cde0f0;--bg:#eef5fc;
+  --q1:#0f2741;--q2:#1e4678;--q3:#3b74c8;--q4:#a8c8ec;
+  --q1t:#a8c8ec;--q2t:#a8c8ec;--q3t:#fff;--q4t:#163559;
+}
+html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);overflow:hidden;color:var(--n8)}
+::selection{background:var(--n3);color:#fff}
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--brd);border-radius:2px}
+
+/* ── HEADER ── */
+#hdr{
+  position:fixed;top:0;left:0;right:0;z-index:1000;
+  height:52px;background:var(--n9);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 18px;
+  border-bottom:1px solid rgba(255,255,255,0.06);
+}
+.hdr-left{display:flex;align-items:center;gap:11px}
+.logo-mark{
+  width:32px;height:32px;border-radius:6px;
+  background:linear-gradient(135deg,var(--n6) 0%,var(--n4) 100%);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Cormorant Garamond',serif;
+  font-size:17px;font-weight:700;color:#fff;letter-spacing:-0.5px;
+}
+.hdr-title h1{
+  font-family:'Cormorant Garamond',serif;
+  font-size:16px;font-weight:700;color:#fff;letter-spacing:0.8px;
+  line-height:1.1;
+}
+.hdr-title p{font-size:9.5px;color:var(--txt-m);letter-spacing:0.2px;line-height:1}
+.hdr-right{display:flex;align-items:center;gap:16px}
+.hdr-pill{
+  background:var(--n7);padding:3px 9px;border-radius:10px;
+  font-size:9.5px;color:var(--n3);letter-spacing:0.3px;
+}
+.hdr-sep{width:1px;height:16px;background:rgba(255,255,255,0.1)}
+
+
+/* ── LAYOUT ── */
+#app{
+  display:flex;position:fixed;
+  top:52px;left:0;right:0;bottom:0;
+}
+
+/* ── SIDEBAR ── */
+#sb{
+  width:232px;min-width:232px;
+  background:var(--n8);
+  display:flex;flex-direction:column;
+  overflow-y:auto;overflow-x:hidden;
+  z-index:100;
+  border-right:1px solid rgba(255,255,255,0.05);
+}
+.sb-sec{padding:14px 15px;border-bottom:1px solid rgba(255,255,255,0.05)}
+.sb-lbl{
+  font-size:8.5px;font-weight:600;color:var(--txt-m);
+  letter-spacing:1.4px;text-transform:uppercase;margin-bottom:10px;
+}
+.layer-opt{
+  display:flex;align-items:center;gap:9px;
+  padding:7px 10px;border-radius:6px;cursor:pointer;
+  margin-bottom:2px;transition:background 0.12s;
+  user-select:none;
+}
+.layer-opt:hover{background:rgba(255,255,255,0.05)}
+.layer-opt.sel{background:var(--n6)}
+.layer-swatch{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.layer-opt span{font-size:11.5px;color:var(--txt-d);line-height:1.3}
+.leg-row{display:flex;align-items:flex-start;gap:9px;margin-bottom:8px}
+.leg-sw{width:12px;height:12px;border-radius:3px;flex-shrink:0;margin-top:1px}
+.leg-text{display:flex;flex-direction:column}
+.leg-text b{font-size:10.5px;color:var(--txt-d);font-weight:600;line-height:1.2}
+.leg-text small{font-size:9.5px;color:var(--txt-m);line-height:1.3;font-style:italic}
+.sb-stat{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:5px 0;border-bottom:1px dashed rgba(255,255,255,0.06);
+}
+.sb-stat:last-child{border-bottom:none}
+.sb-stat span{font-size:10px;color:var(--txt-m)}
+.sb-stat strong{font-size:11px;color:var(--txt-d)}
+.sb-foot{
+  margin-top:auto;padding:14px 15px;
+  border-top:1px solid rgba(255,255,255,0.05);
+}
+.sb-foot p{font-size:9.5px;color:var(--txt-m);line-height:1.55;margin-bottom:3px}
+
+/* ── MAP ── */
+#mw{flex:1;position:relative;min-width:0}
+#map{width:100%;height:100%}
+.map-hint{
+  position:absolute;bottom:22px;left:50%;transform:translateX(-50%);
+  z-index:500;background:rgba(7,25,43,0.82);color:var(--n2);
+  font-size:10.5px;padding:6px 15px;border-radius:20px;
+  pointer-events:none;backdrop-filter:blur(6px);
+  transition:opacity 0.4s;white-space:nowrap;
+}
+.map-hint.hide{opacity:0;pointer-events:none}
+
+/* ── PANEL ── */
+#pnl{
+  width:368px;min-width:368px;
+  background:#fff;
+  display:flex;flex-direction:column;
+  transform:translateX(100%);
+  transition:transform 0.28s cubic-bezier(0.4,0,0.2,1);
+  box-shadow:-4px 0 24px rgba(0,0,0,0.1);
+  overflow:hidden;z-index:200;
+}
+#pnl.open{transform:translateX(0)}
+#pnl-empty{
+  display:flex;flex-direction:column;align-items:center;
+  justify-content:center;height:100%;
+  padding:32px 24px;text-align:center;
+}
+.pe-ico{
+  width:52px;height:52px;border-radius:50%;
+  background:var(--n1);display:flex;align-items:center;justify-content:center;
+  margin:0 auto 14px;
+}
+.pe-ico svg{width:22px;height:22px;opacity:0.5;fill:var(--n5)}
+#pnl-empty h3{font-size:13px;color:var(--n7);margin-bottom:6px;font-weight:600}
+#pnl-empty p{font-size:11px;color:#8a9db0;line-height:1.65}
+#pnl-body{display:none;flex-direction:column;height:100%}
+.ph{background:var(--n9);padding:13px 15px;flex-shrink:0}
+.ph-row{display:flex;align-items:flex-start;justify-content:space-between}
+.ph-name{
+  font-family:'Cormorant Garamond',serif;
+  font-size:19px;font-weight:700;color:#fff;line-height:1.15;margin-bottom:3px;
+}
+.ph-sub{font-size:10px;color:var(--txt-m);margin-bottom:7px}
+#pnl-badge{
+  display:inline-block;padding:3px 10px;border-radius:10px;
+  font-size:9.5px;font-weight:600;letter-spacing:0.3px;margin-top:2px;
+}
+.bq1{background:var(--q1);color:var(--q1t)}.bq2{background:var(--q2);color:var(--q2t)}
+.bq3{background:var(--q3);color:var(--q3t)}.bq4{background:var(--q4);color:var(--q4t)}
+#close-pnl{
+  background:none;border:none;cursor:pointer;
+  color:var(--txt-m);font-size:17px;line-height:1;
+  padding:0 0 0 8px;margin-top:2px;flex-shrink:0;
+  transition:color 0.12s;
+}
+#close-pnl:hover{color:#fff}
+.kpi-row{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  border-bottom:1px solid var(--brd);flex-shrink:0;
+}
+.kpi{
+  padding:9px 11px;text-align:center;
+  border-right:1px solid var(--brd);
+}
+.kpi:last-child{border-right:none}
+.kpi-l{font-size:8.5px;text-transform:uppercase;letter-spacing:0.7px;color:#8fa8bf;margin-bottom:2px}
+.kpi-v{font-size:19px;font-weight:700;color:var(--n8);line-height:1}
+.kpi-u{font-size:9px;color:#aaa}
+.tabs{
+  display:flex;border-bottom:1px solid var(--brd);
+  background:#fff;flex-shrink:0;
+}
+.tb{
+  flex:1;padding:8px 3px;font-size:9.5px;font-weight:600;
+  text-transform:uppercase;letter-spacing:0.5px;
+  color:#8fa8bf;background:none;border:none;
+  border-bottom:2px solid transparent;cursor:pointer;
+  transition:all 0.14s;
+}
+.tb.on{color:var(--n6);border-bottom-color:var(--n5)}
+.tb:hover:not(.on){color:var(--n5)}
+.tab-p{display:none;overflow-y:auto;flex:1;padding:15px}
+.tab-p.on{display:block}
+.sec-lbl{
+  font-size:8.5px;font-weight:600;text-transform:uppercase;
+  letter-spacing:1px;color:#8fa8bf;margin-bottom:9px;margin-top:14px;
+}
+.sec-lbl:first-child{margin-top:0}
+.note-box{
+  background:var(--n0);border-left:3px solid var(--n3);
+  padding:9px 11px;border-radius:0 5px 5px 0;
+  font-size:11px;line-height:1.65;color:var(--txt-l);margin-bottom:10px;
+}
+.reko-box{
+  background:#fff9f4;border-left:3px solid var(--am);
+  padding:9px 11px;border-radius:0 5px 5px 0;
+  font-size:11px;line-height:1.65;color:#4a3020;margin-bottom:10px;
+}
+.reko-box strong{display:block;font-size:8.5px;text-transform:uppercase;letter-spacing:0.7px;color:var(--am);margin-bottom:3px}
+.basis-chip{
+  display:inline-block;background:var(--n7);color:var(--n2);
+  padding:2px 8px;border-radius:10px;font-size:9.5px;font-weight:600;margin:2px 2px 2px 0;
+}
+.ch-wrap{position:relative;width:100%;margin-bottom:12px}
+.axis-lbl{font-size:9px;color:#8fa8bf;text-align:center;margin-top:4px}
+.quad-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:4px;margin-top:10px}
+.quad{padding:9px 10px;border-radius:5px;font-size:9.5px;line-height:1.45}
+.quad.hl{box-shadow:0 0 0 2px var(--am)}
+.quad-lbl{font-weight:700;font-size:10.5px;margin-bottom:2px}
+.mini-tbl{width:100%;border-collapse:collapse;font-size:10.5px}
+.mini-tbl th{
+  text-align:left;font-size:8.5px;text-transform:uppercase;
+  letter-spacing:0.5px;color:#8fa8bf;padding:4px 5px;
+  border-bottom:1px solid var(--brd);
+}
+.mini-tbl td{padding:4px 5px;border-bottom:1px solid #f0f6fc;color:var(--txt-l)}
+.mini-tbl tr:last-child td{border-bottom:none}
+.lq-bar-wrap{margin-bottom:6px}
+.lq-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.lq-name{font-size:9.5px;color:var(--txt-l);width:120px;flex-shrink:0;line-height:1.2}
+.lq-bar-bg{flex:1;height:8px;background:#edf2f8;border-radius:2px;position:relative}
+.lq-bar{height:8px;border-radius:2px;transition:width 0.5s ease}
+.lq-val{font-size:9.5px;font-weight:600;width:32px;text-align:right;flex-shrink:0}
+.dlq-dot{
+  width:7px;height:7px;border-radius:50%;flex-shrink:0;
+  margin-left:3px;
+}
+
+.q1-bg{background:var(--q1);color:var(--q1t)}
+.q2-bg{background:var(--q2);color:var(--q2t)}
+.q3-bg{background:var(--q3);color:var(--q3t)}
+.q4-bg{background:var(--q4);color:var(--q4t)}
+.b1{background:var(--q1);color:var(--q1t)}
+.b2{background:var(--q2);color:var(--q2t)}
+.b3{background:var(--q3);color:var(--q3t)}
+.b4{background:var(--q4);color:var(--q4t)}
+.bq1{background:var(--q1);color:var(--q1t)}
+.bq2{background:var(--q2);color:var(--q2t)}
+.bq3{background:var(--q3);color:var(--q3t)}
+.bq4{background:var(--q4);color:var(--q4t)}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header id="hdr">
+  <div class="hdr-left">
+    <div class="logo-mark">S</div>
+    <div class="hdr-title">
+      <h1>SEKALA</h1>
+      <p>Sistem Evaluasi Kawasan Analitik Lokal &ndash; Maluku Utara</p>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <span class="hdr-pill">Data BPS PDRB ADHK &middot; 2015&ndash;2023</span>
+    <div class="hdr-sep"></div>
+    <span class="hdr-pill">LQ &middot; DLQ &middot; SSA &middot; Tipologi Klassen</span>
+    <div class="hdr-sep"></div>
+    <span class="hdr-pill">Prototipe 2026</span>
+  </div>
+</header>
+
+<div id="app">
+
+<!-- SIDEBAR -->
+<nav id="sb">
+  <div class="sb-sec">
+    <div class="sb-lbl">Tampilan Peta</div>
+    <div id="layer-list"></div>
+  </div>
+  <div class="sb-sec">
+    <div class="sb-lbl">Legenda</div>
+    <div id="legend"></div>
+  </div>
+  <div class="sb-sec">
+    <div class="sb-lbl">Ringkasan Provinsi</div>
+    <div class="sb-stat"><span>Jumlah Kab/Kota</span><strong>10</strong></div>
+    <div class="sb-stat"><span>Sektor Analisis</span><strong>11</strong></div>
+    <div class="sb-stat"><span>Pertumbuhan Tertinggi</span><strong>34,2%</strong></div>
+    <div class="sb-stat"><span>IPM Terendah</span><strong>65,84</strong></div>
+    <div class="sb-stat"><span>Rata-rata IPM</span><strong>70,75</strong></div>
+    <div class="sb-stat"><span>IPM Nasional</span><strong>74,39</strong></div>
+  </div>
+  <div class="sb-foot">
+    <p>Seluruh nilai analitik merupakan kalkulasi berbasis data PDRB ADHK BPS. Nilai yang ditampilkan adalah hasil simulasi prototikal. Peta administratif merupakan aproksimasi untuk keperluan prototipe.</p>
+    <p style="margin-top:7px;color:#4a6880">Sumber batas wilayah: BIG (produksi). Prototipe 2026 &middot; Ricky</p>
+  </div>
+</nav>
+
+<!-- MAP -->
+<div id="mw">
+  <div id="map"></div>
+  <div class="map-hint" id="mhint">Klik pada area kabupaten atau kota untuk menampilkan analitik sektoral</div>
+</div>
+
+<!-- ANALYTICS PANEL -->
+<aside id="pnl">
+  <div id="pnl-empty">
+    <div class="pe-ico">
+      <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+    </div>
+    <h3>Pilih Kabupaten atau Kota</h3>
+    <p>Klik pada salah satu area di peta untuk menampilkan hasil analisis Location Quotient, Dynamic Location Quotient, Shift-Share Analysis, dan Tipologi Klassen secara interaktif.</p>
+  </div>
+  <div id="pnl-body">
+    <div class="ph">
+      <div class="ph-row">
+        <div>
+          <div class="ph-name" id="pname"></div>
+          <div class="ph-sub" id="psub"></div>
+          <div id="pnl-badge"></div>
+        </div>
+        <button id="close-pnl" onclick="closePanel()">&#x2715;</button>
+      </div>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="kpi-l">Pertumbuhan</div>
+        <div class="kpi-v" id="kv1">—</div>
+        <div class="kpi-u">% PDRB 2022</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l">IPM</div>
+        <div class="kpi-v" id="kv2">—</div>
+        <div class="kpi-u">Indeks 2023</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l">Kemiskinan</div>
+        <div class="kpi-v" id="kv3">—</div>
+        <div class="kpi-u">% (2024)</div>
+      </div>
+    </div>
+    <div class="tabs">
+      <button class="tb on" onclick="swTab('ikh',this)">Ikhtisar</button>
+      <button class="tb" onclick="swTab('lq',this)">LQ-DLQ</button>
+      <button class="tb" onclick="swTab('ssa',this)">SSA</button>
+      <button class="tb" onclick="swTab('kls',this)">Tipologi</button>
+      <button class="tb" onclick="swTab('rek',this)">Kebijakan</button>
+    </div>
+    <div id="tp-ikh" class="tab-p on"></div>
+    <div id="tp-lq"  class="tab-p"></div>
+    <div id="tp-ssa" class="tab-p"></div>
+    <div id="tp-kls" class="tab-p"></div>
+    <div id="tp-rek" class="tab-p"></div>
+  </div>
+</aside>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════
+   DATA
+══════════════════════════════════════════════ */
+const S = ["Pertanian","Pertambangan","Industri Pengolahan","Listrik & Gas","Konstruksi","Perdagangan","Transportasi","Akomodasi","Informasi & Kom.","Jasa Keuangan","Jasa Lainnya"];
+
+const DB = {
+"Kota Ternate":{kode:"8271",ib:"Ternate",tq:"Q1",tl:"Maju dan Tumbuh Cepat",g:12.4,ipm:80.23,mis:3.21,idx:142,lq:[0.31,0.18,0.42,1.24,0.89,2.48,1.87,1.94,2.12,2.34,2.18],dlq:[0.92,0.78,1.12,1.08,0.95,1.24,1.31,1.47,1.52,1.38,1.29],ns:[4.1,1.2,3.8,1.1,5.2,18.4,9.2,6.7,4.3,7.8,8.1],pp:[1.2,0.4,1.1,0.8,2.1,4.2,3.8,2.4,1.9,3.2,2.8],ppw:[2.8,-0.3,1.9,0.9,1.4,7.3,4.2,3.1,2.7,4.8,3.9],basis:["Perdagangan","Transportasi","Akomodasi","Informasi & Kom.","Jasa Keuangan","Jasa Lainnya"],cat:"Ternate berfungsi sebagai pusat perdagangan dan jasa kawasan Maluku Utara. Keunggulan komparatif terkonsentrasi pada sektor tersier dengan DLQ yang menguat, mengindikasikan prospek pertumbuhan jangka menengah yang berkelanjutan.",rek:"Penguatan infrastruktur logistik pelabuhan dan konektivitas digital diprioritaskan untuk mempertahankan keunggulan kompetitif Ternate sebagai hub jasa dan perdagangan kawasan timur Indonesia."},
+"Kota Tidore Kepulauan":{kode:"8272",ib:"Soasio",tq:"Q2",tl:"Maju Namun Tertekan",g:7.8,ipm:75.43,mis:4.18,idx:118,lq:[0.72,0.24,0.38,1.12,0.78,1.68,1.24,1.14,1.08,1.32,1.54],dlq:[0.88,0.71,0.94,1.04,0.91,0.98,1.07,1.12,1.18,1.22,1.15],ns:[3.8,1.4,2.9,0.9,4.7,12.4,6.8,5.2,3.1,5.4,6.8],pp:[0.9,0.3,0.8,0.6,1.8,3.1,2.4,1.8,1.4,2.3,2.1],ppw:[-0.4,-0.8,-0.6,0.2,-0.7,-1.2,0.8,1.1,1.4,1.8,0.9],basis:["Perdagangan","Transportasi","Akomodasi","Informasi & Kom.","Jasa Keuangan"],cat:"Tidore Kepulauan berada pada posisi daerah maju yang tertekan, di mana PDRB per kapita berada di atas rata-rata provinsi tetapi laju pertumbuhan mengalami perlambatan. Dinamika ini mengindikasikan potensi stagnasi jika tidak disertai diversifikasi basis ekonomi.",rek:"Revitalisasi pariwisata sejarah dan budaya melalui investasi infrastruktur destinasi, serta pengembangan industri kreatif berbasis kearifan lokal, diperlukan untuk memulihkan momentum pertumbuhan Tidore Kepulauan."},
+"Halmahera Utara":{kode:"8203",ib:"Tobelo",tq:"Q2",tl:"Maju Namun Tertekan",g:8.2,ipm:73.84,mis:5.92,idx:108,lq:[1.54,0.42,0.28,0.87,1.12,1.24,0.98,0.78,0.84,0.72,1.18],dlq:[1.08,0.84,1.04,0.96,1.14,0.97,1.02,0.91,0.88,0.94,1.07],ns:[8.2,2.4,2.1,0.8,6.4,8.8,5.4,3.8,2.7,3.2,5.4],pp:[2.1,0.7,0.6,0.5,2.8,2.2,2.1,1.4,1.2,1.3,1.9],ppw:[3.8,-1.2,-0.8,-0.4,2.1,-0.9,0.4,-0.7,-0.5,-0.8,1.2],basis:["Pertanian","Konstruksi","Perdagangan"],cat:"Halmahera Utara menunjukkan pola daerah maju yang tertekan dengan basis pertanian yang mulai kehilangan momentum kompetitifnya. Pertumbuhan PDRB berada di bawah rata-rata provinsi meskipun PDRB per kapita masih relatif di atas rata-rata.",rek:"Modernisasi sektor pertanian berbasis teknologi dan pengembangan komoditas pala serta kopra melalui skema kemitraan inti plasma diperlukan untuk memperkuat basis ekonomi yang berkelanjutan di Halmahera Utara."},
+"Halmahera Barat":{kode:"8201",ib:"Jailolo",tq:"Q4",tl:"Relatif Tertinggal",g:6.4,ipm:70.12,mis:7.84,idx:72,lq:[1.82,0.38,0.14,0.64,0.72,0.84,0.68,0.54,0.48,0.42,0.87],dlq:[0.94,0.81,1.08,0.92,0.88,0.97,0.91,0.84,1.02,0.97,0.94],ns:[9.4,2.1,1.2,0.6,4.8,6.2,3.8,2.7,1.9,2.4,4.1],pp:[2.4,0.6,0.3,0.4,2.0,1.6,1.5,1.0,0.8,1.0,1.4],ppw:[-1.8,-1.4,-0.4,-0.6,-1.2,-1.8,-0.9,-0.8,0.3,0.1,-0.7],basis:["Pertanian"],cat:"Halmahera Barat menyimpan paradoks sebagai lokasi ibukota provinsi Maluku Utara namun memiliki basis ekonomi yang lemah. PDRB per kapita berada di bawah rata-rata provinsi dengan pertumbuhan yang tergolong lambat.",rek:"Pengembangan kawasan industri pengolahan produk pertanian berbasis komoditas pala dan kelapa di Jailolo diperlukan untuk meningkatkan nilai tambah lokal dan memperluas lapangan kerja produktif di pusat pemerintahan provinsi."},
+"Halmahera Tengah":{kode:"8202",ib:"Weda",tq:"Q3",tl:"Berkembang Cepat",g:34.2,ipm:69.95,mis:5.84,idx:87,lq:[0.42,1.89,8.74,0.31,1.12,0.67,0.78,0.45,0.38,0.41,0.73],dlq:[0.82,0.91,0.79,1.23,1.45,1.02,0.97,0.85,1.18,1.08,0.91],ns:[3.2,12.4,42.3,0.8,7.2,4.8,3.4,2.1,1.8,2.4,3.1],pp:[1.1,-2.3,18.7,2.1,3.8,1.2,1.4,0.9,0.8,1.1,1.2],ppw:[-1.2,-3.1,12.4,1.9,5.2,-0.8,-0.4,-0.7,1.2,0.9,-0.6],basis:["Industri Pengolahan","Pertambangan","Konstruksi"],cat:"Halmahera Tengah merupakan episentrum anomali pertumbuhan nikel Maluku Utara. Nilai LQ Industri Pengolahan sebesar 8,74 mencerminkan dominasi absolut IWIP, namun DLQ sebesar 0,79 mengindikasikan keunggulan komparatif yang tidak berkelanjutan. Komponen PPW positif disertai Komponen Alokasi negatif mengonfirmasi hambatan institusional dalam eksploitasi potensi kompetitif lokal.",rek:"Penetapan KEK Halmahera Integrated Battery Industrial Zone diprioritaskan sebagai landasan upgrade posisi industri dari upstream NPI menuju midstream-downstream battery value chain. Klausul tenaga kerja lokal bertahap minimum 40 persen di zona smelting dan 60 persen di zona refining perlu dimandatkan dalam regulasi Dewan KEK."},
+"Halmahera Timur":{kode:"8207",ib:"Maba",tq:"Q3",tl:"Berkembang Cepat",g:18.4,ipm:68.42,mis:6.74,idx:82,lq:[1.24,2.14,0.84,0.42,0.74,0.58,0.64,0.38,0.34,0.38,0.64],dlq:[0.87,0.94,1.12,0.98,0.92,1.04,0.88,0.92,1.08,0.96,0.98],ns:[6.8,11.2,4.2,0.5,3.8,3.4,2.8,1.7,1.4,1.8,2.4],pp:[1.8,-1.8,1.2,0.8,1.6,0.9,1.1,0.7,0.6,0.8,0.9],ppw:[2.4,-2.1,0.8,-0.4,-0.9,-0.6,-0.7,-0.5,0.4,-0.3,-0.4],basis:["Pertanian","Pertambangan"],cat:"Halmahera Timur mencatat pertumbuhan di atas rata-rata provinsi yang didorong oleh ekspansi aktivitas pertambangan nikel. Namun DLQ sektor Pertambangan yang melemah mengindikasikan prospek jangka menengah yang semakin kompetitif akibat tekanan pasokan global.",rek:"Diversifikasi basis ekonomi melalui pengembangan agribisnis perkebunan dan perikanan tangkap berbasis teknologi diperlukan untuk mengurangi ketergantungan pada aktivitas ekstraktif di Halmahera Timur."},
+"Halmahera Selatan":{kode:"8204",ib:"Labuha",tq:"Q4",tl:"Relatif Tertinggal",g:7.2,ipm:67.83,mis:9.12,idx:68,lq:[1.94,0.84,0.18,0.54,0.68,0.74,0.58,0.64,0.42,0.38,0.84],dlq:[0.97,0.88,1.04,0.94,0.91,0.98,0.87,0.92,1.04,0.96,1.01],ns:[10.4,4.8,1.4,0.7,4.2,5.4,3.2,2.8,1.7,1.8,3.8],pp:[2.8,1.4,0.4,0.5,1.8,1.4,1.3,1.1,0.8,0.8,1.3],ppw:[-2.4,-1.8,-0.6,-0.7,-1.4,-2.1,-0.9,-1.2,0.1,-0.4,-0.8],basis:["Pertanian"],cat:"Halmahera Selatan merupakan kabupaten dengan PDRB per kapita rendah dan tingkat kemiskinan tertinggi kedua di Maluku Utara. Dominasi sektor pertanian dengan DLQ yang stagnan mengindikasikan risiko perlambatan daya saing jangka panjang.",rek:"Program transformasi pertanian subsisten menuju pertanian komersial berbasis pala, kelapa, dan perikanan diperlukan, disertai pembangunan infrastruktur konektivitas laut yang menghubungkan pulau-pulau terpencil di wilayah selatan Maluku Utara."},
+"Pulau Morotai":{kode:"8208",ib:"Daruba",tq:"Q3",tl:"Berkembang Cepat",g:16.8,ipm:67.14,mis:8.24,idx:74,lq:[1.14,0.28,0.12,0.74,1.24,0.84,0.94,1.38,0.68,0.54,0.98],dlq:[1.12,0.84,1.18,0.98,1.34,1.08,1.14,1.54,0.94,1.02,1.18],ns:[6.2,1.6,0.8,0.6,7.4,5.8,4.6,4.2,2.2,2.4,4.4],pp:[1.7,0.5,0.2,0.4,3.2,1.5,1.9,1.8,1.0,1.1,1.6],ppw:[2.1,-0.4,0.6,0.1,4.8,0.9,1.4,3.2,0.2,0.4,1.2],basis:["Pertanian","Konstruksi","Akomodasi"],cat:"Pulau Morotai menunjukkan prospek pertumbuhan yang menjanjikan dengan DLQ sektor Konstruksi dan Akomodasi yang menguat, mencerminkan dampak positif pengembangan kawasan pariwisata internasional yang sedang berlangsung.",rek:"Akselerasi pengembangan kawasan pariwisata Morotai diperlukan dengan fokus pada peningkatan kapasitas rantai pasok lokal dan klausul partisipasi tenaga kerja lokal dalam industri pariwisata dan hospitality."},
+"Kepulauan Sula":{kode:"8205",ib:"Sanana",tq:"Q3",tl:"Berkembang Cepat",g:13.8,ipm:68.74,mis:8.94,idx:78,lq:[1.84,1.12,0.24,0.48,0.84,0.74,0.84,0.64,0.44,0.48,0.84],dlq:[1.18,0.92,1.08,0.96,0.94,1.02,1.04,0.98,1.12,1.08,1.04],ns:[9.8,5.8,1.4,0.6,4.8,5.2,3.8,2.6,1.6,2.2,3.8],pp:[2.6,1.7,0.4,0.4,2.1,1.4,1.6,1.0,0.7,1.0,1.4],ppw:[3.8,-1.2,0.4,-0.3,-0.6,-0.9,0.2,-0.5,0.6,0.3,0.1],basis:["Pertanian","Pertambangan"],cat:"Kepulauan Sula menunjukkan pola pertumbuhan yang didorong oleh sektor primer dengan DLQ Pertanian yang menguat, mengindikasikan prospek positif untuk pengembangan agribisnis berbasis komoditas perikanan dan perkebunan.",rek:"Pengembangan klaster industri pengolahan ikan dan kelapa terpadu di Sanana diperlukan untuk meningkatkan nilai tambah komoditas primer yang selama ini diekspor dalam kondisi mentah ke luar wilayah."},
+"Pulau Taliabu":{kode:"8209",ib:"Bobong",tq:"Q4",tl:"Relatif Tertinggal",g:6.8,ipm:65.84,mis:11.48,idx:58,lq:[1.94,1.24,0.14,0.38,0.58,0.54,0.64,0.48,0.34,0.32,0.74],dlq:[0.94,0.88,1.04,0.92,0.84,0.98,0.91,0.87,1.08,0.96,0.98],ns:[10.2,6.4,0.8,0.4,3.4,3.8,2.8,2.2,1.2,1.4,3.2],pp:[2.7,1.9,0.2,0.3,1.5,1.0,1.2,0.9,0.5,0.6,1.1],ppw:[-3.2,-2.4,-0.4,-0.8,-1.8,-2.4,-1.2,-1.4,0.2,-0.6,-1.2],basis:["Pertanian","Pertambangan"],cat:"Pulau Taliabu merupakan kabupaten termuda di Maluku Utara dengan IPM terendah dan tingkat kemiskinan tertinggi. Keterbatasan infrastruktur konektivitas dan kapasitas fiskal menjadi hambatan utama pembangunan yang memerlukan intervensi afirmatif segera.",rek:"Intervensi afirmatif melalui Dana Alokasi Khusus infrastruktur dasar dan program pemberdayaan ekonomi berbasis komoditas lokal diperlukan sebagai prasyarat sebelum investasi swasta dapat masuk secara berkelanjutan ke Pulau Taliabu."}
+};
+
+/* ══════════════════════════════════════════════
+   GEOJSON (Aproksimasi Batas Wilayah Prototipe)
+══════════════════════════════════════════════ */
+const GJ = {"type":"FeatureCollection","features":[
+{"type":"Feature","properties":{"name":"Kota Ternate"},"geometry":{"type":"Polygon","coordinates":[[[127.295,0.728],[127.342,0.704],[127.418,0.718],[127.452,0.786],[127.428,0.858],[127.365,0.892],[127.296,0.871],[127.265,0.802],[127.295,0.728]]]}},
+{"type":"Feature","properties":{"name":"Kota Tidore Kepulauan"},"geometry":{"type":"Polygon","coordinates":[[[127.378,0.518],[127.448,0.494],[127.558,0.514],[127.592,0.614],[127.548,0.708],[127.452,0.722],[127.378,0.682],[127.348,0.598],[127.378,0.518]]]}},
+{"type":"Feature","properties":{"name":"Halmahera Barat"},"geometry":{"type":"Polygon","coordinates":[[[127.108,0.908],[127.584,0.852],[127.722,0.682],[127.744,0.488],[127.698,0.274],[127.602,0.108],[127.554,-0.018],[127.432,-0.158],[127.272,-0.132],[127.068,0.082],[127.002,0.378],[127.028,0.648],[127.108,0.908]]]}},
+{"type":"Feature","properties":{"name":"Halmahera Utara"},"geometry":{"type":"Polygon","coordinates":[[[127.402,0.874],[127.652,0.898],[128.002,0.842],[128.298,0.882],[128.482,1.198],[128.618,1.548],[128.572,1.952],[128.382,2.378],[128.082,2.638],[127.762,2.618],[127.522,2.312],[127.358,1.822],[127.312,1.382],[127.402,0.874]]]}},
+{"type":"Feature","properties":{"name":"Pulau Morotai"},"geometry":{"type":"Polygon","coordinates":[[[128.072,2.194],[128.432,2.082],[128.872,2.132],[128.968,2.442],[128.822,2.882],[128.392,2.972],[128.062,2.762],[127.932,2.492],[128.072,2.194]]]}},
+{"type":"Feature","properties":{"name":"Halmahera Tengah"},"geometry":{"type":"Polygon","coordinates":[[[127.722,0.488],[127.762,0.682],[128.022,0.842],[128.298,0.882],[128.452,0.642],[128.482,0.382],[128.338,0.132],[128.082,-0.068],[127.972,-0.228],[127.782,-0.272],[127.602,-0.128],[127.562,0.012],[127.602,0.108],[127.722,0.488]]]}},
+{"type":"Feature","properties":{"name":"Halmahera Timur"},"geometry":{"type":"Polygon","coordinates":[[[128.298,0.882],[128.452,0.642],[128.482,0.382],[128.482,0.102],[128.652,-0.128],[129.098,-0.238],[129.428,-0.312],[129.468,-0.628],[129.222,-0.928],[128.918,-0.978],[128.658,-0.778],[128.492,-0.568],[128.298,-0.308],[128.082,-0.068],[128.338,0.132],[128.482,0.382],[128.298,0.882]]]}},
+{"type":"Feature","properties":{"name":"Halmahera Selatan"},"geometry":{"type":"Polygon","coordinates":[[[127.272,-0.132],[127.432,-0.158],[127.554,-0.018],[127.602,-0.128],[127.782,-0.272],[127.972,-0.228],[128.082,-0.068],[128.298,-0.308],[128.492,-0.568],[128.658,-0.778],[128.618,-1.128],[128.518,-1.528],[128.292,-1.928],[128.012,-2.128],[127.702,-2.118],[127.432,-1.818],[127.182,-1.518],[126.912,-1.218],[126.842,-0.918],[126.992,-0.638],[127.132,-0.418],[127.272,-0.132]]]}},
+{"type":"Feature","properties":{"name":"Kepulauan Sula"},"geometry":{"type":"Polygon","coordinates":[[[125.298,-1.558],[126.048,-1.432],[126.468,-1.668],[126.418,-2.108],[125.828,-2.258],[125.278,-2.078],[125.048,-1.808],[125.298,-1.558]]]}},
+{"type":"Feature","properties":{"name":"Pulau Taliabu"},"geometry":{"type":"Polygon","coordinates":[[[123.382,-1.348],[124.048,-1.242],[124.308,-1.488],[124.218,-1.898],[123.838,-2.058],[123.348,-1.908],[123.192,-1.608],[123.382,-1.348]]]}}
+]};
+
+/* ══════════════════════════════════════════════
+   LAYER CONFIG
+══════════════════════════════════════════════ */
+const LAYERS = [
+  {id:"tipologi",  lbl:"Tipologi Klassen",       dot:"#3b74c8"},
+  {id:"lq_ind",   lbl:"LQ Industri Pengolahan",  dot:"#2558a0"},
+  {id:"lq_tan",   lbl:"LQ Pertanian",             dot:"#6b9fd8"},
+  {id:"dlq_avg",  lbl:"DLQ Rata-rata Sektor Basis",dot:"#a8c8ec"},
+  {id:"growth",   lbl:"Pertumbuhan PDRB 2022",    dot:"#163559"}
+];
+
+let activeLayer = "tipologi";
+let selectedName = null;
+let activeCharts = {};
+
+/* ══════════════════════════════════════════════
+   MAP
+══════════════════════════════════════════════ */
+const map = L.map("map", {zoomControl:true,minZoom:6,maxZoom:12});
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",{
+  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains:"abcd",maxZoom:19
+}).addTo(map);
+
+function getColor(name, layer) {
+  const d = DB[name]; if(!d) return "#cde0f0";
+  if(layer === "tipologi") {
+    return {Q1:"#0f2741",Q2:"#1e4678",Q3:"#3b74c8",Q4:"#a8c8ec"}[d.tq]||"#cde0f0";
+  }
+  if(layer === "lq_ind") {
+    const v = d.lq[2]; // Industri Pengolahan index
+    if(v>4) return "#0f2741"; if(v>2) return "#1e4678"; if(v>1) return "#3b74c8"; return "#a8c8ec";
+  }
+  if(layer === "lq_tan") {
+    const v = d.lq[0];
+    if(v>1.8) return "#0f2741"; if(v>1.4) return "#1e4678"; if(v>1) return "#3b74c8"; return "#a8c8ec";
+  }
+  if(layer === "dlq_avg") {
+    const bases = d.basis.map(b=>S.indexOf(b)).filter(i=>i>=0);
+    const avg = bases.length ? bases.reduce((a,i)=>a+d.dlq[i],0)/bases.length : 0;
+    if(avg>1.2) return "#0f2741"; if(avg>1.0) return "#1e4678"; if(avg>0.9) return "#3b74c8"; return "#a8c8ec";
+  }
+  if(layer === "growth") {
+    const v = d.g;
+    if(v>25) return "#0f2741"; if(v>15) return "#1e4678"; if(v>10) return "#3b74c8"; return "#a8c8ec";
+  }
+  return "#cde0f0";
+}
+
+function style(f) {
+  const nm = f.properties.name;
+  const sel = nm === selectedName;
+  return {
+    fillColor: getColor(nm, activeLayer),
+    weight: sel ? 2.5 : 1,
+    color: sel ? "#c96a1e" : "#fff",
+    fillOpacity: sel ? 0.92 : 0.78
+  };
+}
+
+let gjLayer = L.geoJSON(GJ, {
+  style,
+  onEachFeature: (f, layer) => {
+    layer.on({
+      mouseover: e => { const isSel = f.properties.name === selectedName; e.target.setStyle({fillOpacity:1,weight:2,color:isSel?'#c96a1e':'#3b74c8'}); },
+      mouseout: e => { gjLayer.resetStyle(e.target); },
+      click: e => { selectRegion(f.properties.name); }
+    });
+    layer.bindTooltip(f.properties.name, {
+      className:"", permanent:false, direction:"top",
+      offset:[0,-4],
+      pane:"tooltipPane"
+    });
+  }
+}).addTo(map);
+
+map.fitBounds([[3.1,122.8],[-2.5,130.0]]);
+
+// IWIP landmark marker (Weda Bay Industrial Park)
+const iwipIcon = L.divIcon({
+  className:'',
+  html:`<div style="
+    width:10px;height:10px;background:#c96a1e;border:2px solid #fff;
+    border-radius:50%;box-shadow:0 0 0 3px rgba(201,106,30,0.35);
+    animation:pulse 2s infinite;">
+  </div>`,
+  iconSize:[10,10],iconAnchor:[5,5]
+});
+const iwipMarker = L.marker([-0.34, 127.99], {icon:iwipIcon})
+  .addTo(map)
+  .bindTooltip("IWIP &ndash; Indonesia Weda Bay Industrial Park<br><small>Episentrum nikel Maluku Utara</small>", {
+    permanent:false, direction:"top", offset:[0,-8],
+    className:"iwip-tt"
+  });
+
+// Pulsing CSS & IWIP tooltip
+const pulseCss = document.createElement("style");
+pulseCss.textContent = `
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 3px rgba(201,106,30,0.35)} 50%{box-shadow:0 0 0 6px rgba(201,106,30,0.1)} }
+  .iwip-tt { font-family:'DM Sans',sans-serif; font-size:11px; background:#07192b !important;
+    color:#d8eaf8 !important; border:none !important; border-radius:6px !important;
+    padding:6px 10px !important; box-shadow:0 4px 16px rgba(0,0,0,0.25) !important; }
+  .iwip-tt::before { border-top-color:#07192b !important; }
+`;
+document.head.appendChild(pulseCss);
+
+// Map overlay info (top-right)
+const infoBox = L.control({position:"topright"});
+infoBox.onAdd = function() {
+  const d = L.DomUtil.create("div");
+  d.style.cssText = "background:#fff;padding:10px 13px;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:10px;color:#4a6880;box-shadow:0 2px 12px rgba(0,0,0,0.1);max-width:200px;line-height:1.5;";
+  d.innerHTML = `<div style="font-weight:700;color:#0f2741;font-size:11px;margin-bottom:4px">Maluku Utara</div>
+  <div>10 Kabupaten/Kota &middot; 2015&ndash;2023</div>
+  <div style="margin-top:5px;padding-top:5px;border-top:1px solid #edf2f8">
+    <span style="display:inline-block;width:7px;height:7px;background:#c96a1e;border-radius:50%;margin-right:4px"></span>Lokasi IWIP (Weda)</div>`;
+  return d;
+};
+infoBox.addTo(map);
+
+
+/* ══════════════════════════════════════════════
+   SIDEBAR BUILD
+══════════════════════════════════════════════ */
+const layerListEl = document.getElementById("layer-list");
+LAYERS.forEach(lr => {
+  const div = document.createElement("div");
+  div.className = "layer-opt" + (lr.id===activeLayer?" sel":"");
+  div.innerHTML = `<div class="layer-swatch" style="background:${lr.dot}"></div><span>${lr.lbl}</span>`;
+  div.onclick = () => {
+    activeLayer = lr.id;
+    document.querySelectorAll(".layer-opt").forEach(x=>x.classList.remove("sel"));
+    div.classList.add("sel");
+    gjLayer.setStyle(style);
+    buildLegend();
+    if(selectedName) gjLayer.setStyle(style);
+  };
+  layerListEl.appendChild(div);
+});
+
+function buildLegend() {
+  const el = document.getElementById("legend");
+  if(activeLayer === "tipologi") {
+    el.innerHTML = `
+      <div class="leg-row"><div class="leg-sw" style="background:#0f2741"></div><div class="leg-text"><b>Maju dan Tumbuh Cepat</b><small>g lebih dari avg, PDRB/kap lebih dari avg</small></div></div>
+      <div class="leg-row"><div class="leg-sw" style="background:#1e4678"></div><div class="leg-text"><b>Maju Namun Tertekan</b><small>g kurang dari avg, PDRB/kap lebih dari avg</small></div></div>
+      <div class="leg-row"><div class="leg-sw" style="background:#3b74c8"></div><div class="leg-text"><b>Berkembang Cepat</b><small>g lebih dari avg, PDRB/kap kurang dari avg</small></div></div>
+      <div class="leg-row"><div class="leg-sw" style="background:#a8c8ec"></div><div class="leg-text"><b>Relatif Tertinggal</b><small>g kurang dari avg, PDRB/kap kurang dari avg</small></div></div>`;
+  } else {
+    el.innerHTML = `
+      <div class="leg-row"><div class="leg-sw" style="background:#0f2741"></div><div class="leg-text"><b>Sangat Tinggi</b></div></div>
+      <div class="leg-row"><div class="leg-sw" style="background:#1e4678"></div><div class="leg-text"><b>Tinggi</b></div></div>
+      <div class="leg-row"><div class="leg-sw" style="background:#3b74c8"></div><div class="leg-text"><b>Sedang / Basis</b></div></div>
+      <div class="leg-row"><div class="leg-sw" style="background:#a8c8ec"></div><div class="leg-text"><b>Rendah / Non-Basis</b></div></div>`;
+  }
+}
+buildLegend();
+
+/* ══════════════════════════════════════════════
+   PANEL
+══════════════════════════════════════════════ */
+function selectRegion(name) {
+  if(!DB[name]) return;
+  selectedName = name;
+  document.getElementById("mhint").classList.add("hide");
+  gjLayer.setStyle(style);
+  openPanel(name);
+}
+
+function openPanel(name) {
+  const d = DB[name];
+  document.getElementById("pnl-empty").style.display = "none";
+  const pb = document.getElementById("pnl-body");
+  pb.style.display = "flex";
+  document.getElementById("pnl").classList.add("open");
+  document.getElementById("pname").textContent = name;
+  document.getElementById("psub").textContent = "Ibukota: " + d.ib + " · Kode: " + d.kode;
+  const badge = document.getElementById("pnl-badge");
+  badge.textContent = d.tl;
+  badge.className = "bq" + d.tq.slice(1);
+  document.getElementById("kv1").textContent = d.g.toFixed(1);
+  document.getElementById("kv2").textContent = d.ipm.toFixed(2);
+  document.getElementById("kv3").textContent = d.mis.toFixed(2);
+  // reset tabs
+  document.querySelectorAll(".tb").forEach((b,i)=>{b.classList.remove("on"); if(i===0) b.classList.add("on")});
+  document.querySelectorAll(".tab-p").forEach((p,i)=>{p.classList.remove("on"); if(i===0) p.classList.add("on")});
+  buildTabs(name, d);
+}
+
+function closePanel() {
+  document.getElementById("pnl").classList.remove("open");
+  document.getElementById("pnl-empty").style.display = "";
+  document.getElementById("pnl-body").style.display = "none";
+  selectedName = null;
+  gjLayer.setStyle(style);
+  Object.values(activeCharts).forEach(c=>c.destroy());
+  activeCharts = {};
+  document.getElementById("mhint").classList.remove("hide");
+}
+
+function swTab(id, btn) {
+  document.querySelectorAll(".tb").forEach(b=>b.classList.remove("on"));
+  document.querySelectorAll(".tab-p").forEach(p=>p.classList.remove("on"));
+  btn.classList.add("on");
+  document.getElementById("tp-"+id).classList.add("on");
+  if(selectedName && id==="lq") buildLqChart(selectedName, DB[selectedName]);
+  if(selectedName && id==="ssa") buildSsaChart(selectedName, DB[selectedName]);
+  if(selectedName && id==="kls") buildKlsChart(selectedName, DB[selectedName]);
+}
+
+function buildTabs(name, d) {
+  // --- IKHTISAR ---
+  let ikh = `<div class="sec-lbl">Gambaran Analitis</div>
+  <div class="note-box">${d.cat}</div>
+  <div class="sec-lbl">Sektor Basis Teridentifikasi</div>
+  <div style="margin-bottom:10px">${d.basis.map(b=>`<span class="basis-chip">${b}</span>`).join("")}</div>
+  <div class="sec-lbl">Nilai LQ dan Tren DLQ per Sektor</div>
+  <div>${d.lq.map((v,i)=>{
+    const w=Math.min(v/10*100,100);
+    const isBasis=v>1;
+    const up=d.dlq[i]>1;
+    return `<div class="lq-row">
+      <div class="lq-name" title="${S[i]}">${S[i].length>14?S[i].substring(0,13)+'…':S[i]}</div>
+      <div class="lq-bar-bg">
+        <div class="lq-bar" style="width:${w}%;background:${isBasis?'#1e4678':'#cde0f0'}"></div>
+      </div>
+      <div class="lq-val" style="color:${isBasis?'#1e4678':'#8fa8bf'}">${v.toFixed(2)}</div>
+      <div style="font-size:9px;font-weight:700;color:${up?'#3b74c8':'#c96a1e'};width:12px;text-align:center">${up?'↑':'↓'}</div>
+    </div>`;
+  }).join('')}</div>
+  <div class="sec-lbl">Data Pokok</div>
+  <table class="mini-tbl">
+    <tr><th>Indikator</th><th>Nilai</th><th>Keterangan</th></tr>
+    <tr><td>Pertumbuhan PDRB</td><td><strong>${d.g.toFixed(1)}%</strong></td><td>${d.g>15?'Di atas avg provinsi':'Di bawah avg provinsi'}</td></tr>
+    <tr><td>IPM</td><td><strong>${d.ipm}</strong></td><td>${d.ipm>74.39?'Di atas nasional':'Di bawah nasional (74,39)'}</td></tr>
+    <tr><td>Kemiskinan</td><td><strong>${d.mis}%</strong></td><td>Mar 2024</td></tr>
+    <tr><td>PDRB/Kap (Indeks)</td><td><strong>${d.idx}</strong></td><td>Avg provinsi = 100</td></tr>
+    <tr><td>Jumlah Sektor Basis</td><td><strong>${d.basis.length}</strong></td><td>dari 11 sektor</td></tr>
+  </table>`;
+  document.getElementById("tp-ikh").innerHTML = ikh;
+
+  // --- LQ-DLQ ---
+  let lqHtml = `<div class="sec-lbl">Matriks Klasifikasi Sektoral LQ × DLQ</div>
+  <div class="ch-wrap"><canvas id="ch-lqdlq" height="260"></canvas></div>
+  <div class="axis-lbl">Sumbu-X = Nilai LQ &nbsp;|&nbsp; Sumbu-Y = Nilai DLQ &nbsp;|&nbsp; Garis putus-putus = ambang batas 1,0</div>
+  <div class="sec-lbl" style="margin-top:12px">Klasifikasi Kuadran LQ-DLQ</div>
+  <table class="mini-tbl">
+    <tr><th>Kuadran</th><th>Kriteria</th><th>Status</th></tr>
+    <tr><td>I. Unggulan</td><td>LQ &gt; 1, DLQ &gt; 1</td><td style="color:#0f2741;font-weight:600">Basis prospektif</td></tr>
+    <tr><td>II. Andalan</td><td>LQ &gt; 1, DLQ &lt; 1</td><td style="color:#c96a1e;font-weight:600">Basis melemah</td></tr>
+    <tr><td>III. Potensial</td><td>LQ &lt; 1, DLQ &gt; 1</td><td style="color:#3b74c8;font-weight:600">Kandidat basis</td></tr>
+    <tr><td>IV. Tertinggal</td><td>LQ &lt; 1, DLQ &lt; 1</td><td style="color:#8fa8bf;font-weight:600">Non-basis stagnan</td></tr>
+  </table>`;
+  document.getElementById("tp-lq").innerHTML = lqHtml;
+
+  // --- SSA ---
+  let ssaHtml = `<div class="sec-lbl">Dekomposisi Pertumbuhan Sektoral (Shift-Share Esteban-Marquillas)</div>
+  <div class="ch-wrap"><canvas id="ch-ssa" height="280"></canvas></div>
+  <div class="sec-lbl" style="margin-top:10px">Definisi Komponen</div>
+  <table class="mini-tbl">
+    <tr><th>Komponen</th><th>Makna Analitis</th></tr>
+    <tr><td><span style="color:#0f2741;font-weight:700">NS</span></td><td>National Share: pertumbuhan akibat ekspansi ekonomi nasional</td></tr>
+    <tr><td><span style="color:#3b74c8;font-weight:700">PP</span></td><td>Proportionality Shift: pengaruh spesialisasi sektor tumbuh cepat</td></tr>
+    <tr><td><span style="color:#6b9fd8;font-weight:700">PPW</span></td><td>Differential Shift: keunggulan kompetitif lokal sesungguhnya</td></tr>
+  </table>`;
+  document.getElementById("tp-ssa").innerHTML = ssaHtml;
+
+  // --- TIPOLOGI ---
+  const qMeta = {
+    Q1:{label:"Maju dan Tumbuh Cepat",css:"q1-bg"},
+    Q2:{label:"Maju Namun Tertekan",css:"q2-bg"},
+    Q3:{label:"Berkembang Cepat",css:"q3-bg"},
+    Q4:{label:"Relatif Tertinggal",css:"q4-bg"}
+  };
+  let klsHtml = `<div class="sec-lbl">Posisi Tipologi Klassen (Seluruh Kab/Kota)</div>
+  <div class="ch-wrap"><canvas id="ch-kls" height="220"></canvas></div>
+  <div class="axis-lbl">Sumbu-X = Indeks PDRB per Kapita (avg = 100) &nbsp;|&nbsp; Sumbu-Y = Pertumbuhan PDRB (%)</div>
+  <div class="sec-lbl" style="margin-top:10px">Klasifikasi Tipologi</div>
+  <div class="quad-grid">`;
+  ["Q1","Q2","Q3","Q4"].forEach(q=>{
+    const m = qMeta[q];
+    klsHtml += `<div class="quad ${q.toLowerCase()}-bg ${d.tq===q?'hl':''}" style="background:var(--${q.toLowerCase()});color:var(--${q.toLowerCase()}t)">
+      <div class="quad-lbl">${m.label}${d.tq===q?' ◀':''}</div>
+      ${["Q1","Q2","Q3","Q4"].filter(x=>x===q).length&&d.tq===q?`<div style="font-size:9px;opacity:0.8">${name}</div>`:''}
+    </div>`;
+  });
+  klsHtml += `</div>`;
+  document.getElementById("tp-kls").innerHTML = klsHtml;
+
+  // --- REKOMENDASI ---
+  document.getElementById("tp-rek").innerHTML = `
+  <div class="sec-lbl">Rekomendasi Kebijakan</div>
+  <div class="reko-box"><strong>Arahan Kebijakan Berbasis Bukti</strong>${d.rek}</div>
+  <div class="sec-lbl">Instrumen Analitik Pendukung</div>
+  <div class="note-box">Tipologi <strong>${d.tq}: ${d.tl}</strong> &middot; LQ rata-rata sektor basis: <strong>${(d.basis.map(b=>d.lq[S.indexOf(b)]).filter(v=>v>0).reduce((a,v)=>a+v,0)/Math.max(d.basis.length,1)).toFixed(2)}</strong> &middot; Pertumbuhan PDRB: <strong>${d.g}%</strong> (2022)</div>
+  <div class="sec-lbl">Catatan Metodologis</div>
+  <div class="note-box" style="font-style:italic;font-size:10.5px">Seluruh nilai analitik bersumber dari kalkulasi berbasis PDRB ADHK BPS. Nilai LQ mengasumsikan pola konsumsi antardaerah yang homogen. Nilai DLQ merupakan proyeksi tren historis yang bersifat ceteris paribus. Komponen SSA mendeskripsikan pola pertumbuhan dan tidak mengimplikasikan kausalitas.</div>`;
+
+  buildLqChart(name, d);
+}
+
+function buildLqChart(name, d) {
+  const ctx = document.getElementById("ch-lqdlq");
+  if(!ctx) return;
+  if(activeCharts["lqdlq"]) { activeCharts["lqdlq"].destroy(); delete activeCharts["lqdlq"]; }
+  const pts = S.map((s,i)=>({x:d.lq[i],y:d.dlq[i],label:s,basis:d.lq[i]>1}));
+  activeCharts["lqdlq"] = new Chart(ctx, {
+    type:"scatter",
+    data:{datasets:[
+      {label:"Sektor Basis",data:pts.filter(p=>p.basis),backgroundColor:"#1e4678",pointRadius:6,pointHoverRadius:8},
+      {label:"Non-Basis",data:pts.filter(p=>!p.basis),backgroundColor:"#a8c8ec",pointRadius:5,pointHoverRadius:7}
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:true,
+      plugins:{
+        legend:{display:true,position:"bottom",labels:{boxWidth:10,font:{size:9},color:"#7aa0c0"}},
+        tooltip:{callbacks:{label:i=>`${i.raw.label}: LQ=${i.raw.x.toFixed(2)}, DLQ=${i.raw.y.toFixed(2)}`}},
+
+      },
+      scales:{
+        x:{title:{display:true,text:"Location Quotient (LQ)",font:{size:9},color:"#8fa8bf"},grid:{color:"#eef5fc"},ticks:{font:{size:8},color:"#8fa8bf"},min:0},
+        y:{title:{display:true,text:"Dynamic LQ (DLQ)",font:{size:9},color:"#8fa8bf"},grid:{color:"#eef5fc"},ticks:{font:{size:8},color:"#8fa8bf"},min:0}
+      }
+    }
+  });
+  // Draw quadrant lines manually after chart renders
+  setTimeout(()=>{
+    const c = activeCharts["lqdlq"];
+    if(c){
+      const {ctx:cx,chartArea:{left,right,top,bottom},scales:{x,y}}=c;
+      const x1=x.getPixelForValue(1),y1=y.getPixelForValue(1);
+      cx.save();cx.setLineDash([4,3]);cx.strokeStyle="#c96a1e80";cx.lineWidth=1;
+      cx.beginPath();cx.moveTo(x1,top);cx.lineTo(x1,bottom);cx.stroke();
+      cx.beginPath();cx.moveTo(left,y1);cx.lineTo(right,y1);cx.stroke();
+      cx.restore();
+    }
+  },100);
+}
+
+function buildSsaChart(name, d) {
+  const ctx = document.getElementById("ch-ssa");
+  if(!ctx) return;
+  if(activeCharts["ssa"]) { activeCharts["ssa"].destroy(); delete activeCharts["ssa"]; }
+  const top5 = S.map((s,i)=>({s,ns:d.ns[i],pp:d.pp[i],ppw:d.ppw[i],tot:d.ns[i]+d.pp[i]+d.ppw[i]}))
+    .sort((a,b)=>Math.abs(b.tot)-Math.abs(a.tot)).slice(0,7);
+  activeCharts["ssa"] = new Chart(ctx, {
+    type:"bar",
+    data:{
+      labels:top5.map(t=>t.s),
+      datasets:[
+        {label:"NS",data:top5.map(t=>t.ns),backgroundColor:"#0f2741",borderRadius:2},
+        {label:"PP",data:top5.map(t=>t.pp),backgroundColor:"#3b74c8",borderRadius:2},
+        {label:"PPW",data:top5.map(t=>t.ppw),backgroundColor:"#a8c8ec",borderRadius:2}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:true,indexAxis:"y",
+      plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:9},color:"#7aa0c0"}}},
+      scales:{
+        x:{stacked:false,grid:{color:"#eef5fc"},ticks:{font:{size:8},color:"#8fa8bf"}},
+        y:{stacked:false,ticks:{font:{size:8.5},color:"#4a6880"}}
+      }
+    }
+  });
+}
+
+function buildKlsChart(name, d) {
+  const ctx = document.getElementById("ch-kls");
+  if(!ctx) return;
+  if(activeCharts["kls"]) { activeCharts["kls"].destroy(); delete activeCharts["kls"]; }
+  const pts = Object.entries(DB).map(([nm,dd])=>({
+    x:dd.idx, y:dd.g, label:nm,
+    sel:nm===name, tq:dd.tq
+  }));
+  const colors = {Q1:"#0f2741",Q2:"#1e4678",Q3:"#3b74c8",Q4:"#a8c8ec"};
+  activeCharts["kls"] = new Chart(ctx, {
+    type:"bubble",
+    data:{datasets:[{
+      data:pts.map(p=>({x:p.x,y:p.y,r:p.sel?10:6,label:p.label,tq:p.tq})),
+      backgroundColor:pts.map(p=>p.sel?"#c96a1e":colors[p.tq]+"cc"),
+      borderColor:pts.map(p=>p.sel?"#c96a1e":"transparent"),
+      borderWidth:2
+    }]},
+    options:{
+      responsive:true,maintainAspectRatio:true,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:i=>`${i.raw.label}: PDRB/kap idx=${i.raw.x}, g=${i.raw.y}%`}}
+      },
+      scales:{
+        x:{title:{display:true,text:"Indeks PDRB per Kapita (rata-rata=100)",font:{size:9},color:"#8fa8bf"},grid:{color:"#eef5fc"},ticks:{font:{size:8},color:"#8fa8bf"},min:40,max:160},
+        y:{title:{display:true,text:"Pertumbuhan PDRB (%)",font:{size:9},color:"#8fa8bf"},grid:{color:"#eef5fc"},ticks:{font:{size:8},color:"#8fa8bf"}}
+      }
+    }
+  });
+  setTimeout(()=>{
+    const c=activeCharts["kls"];
+    if(c){
+      const{ctx:cx,chartArea:{left,right,top,bottom},scales:{x,y}}=c;
+      const xAvg=x.getPixelForValue(100),yAvg=y.getPixelForValue(15);
+      cx.save();cx.setLineDash([4,3]);cx.strokeStyle="#3b74c880";cx.lineWidth=1;
+      cx.beginPath();cx.moveTo(xAvg,top);cx.lineTo(xAvg,bottom);cx.stroke();
+      cx.beginPath();cx.moveTo(left,yAvg);cx.lineTo(right,yAvg);cx.stroke();
+      cx.font="8px 'DM Sans',sans-serif";cx.fillStyle="#8fa8bf";
+      cx.fillText("avg growth",xAvg+4,top+12);
+      cx.fillText("avg PDRB/kap",left+4,yAvg-4);
+      cx.restore();
+    }
+  },100);
+}
+
+</script>
+</body>
+</html>
